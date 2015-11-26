@@ -26,24 +26,9 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <string.h>
+#include <stdio.h>
 
 #include <boost/regex.hpp>
-
-/*
-#include <list>
-#include <stdexcept>
-#include <sstream>
-#include <memory>
-
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-
-#include <boost/lexical_cast.hpp>
-#include <boost/optional.hpp>
-*/
-
-#include <stdio.h>
 
 const std::string directory_boot = "/boot";
 const std::string directory_modules = "/lib/modules";
@@ -55,18 +40,24 @@ const std::string prefix_boot_image = "vmlinuz-";
 
 const std::string prefix_src = "linux-";
 
-const std::string regex_files_boot_check = "^(?:(?:" + prefix_boot_config + ")|(?:" + prefix_boot_map + ")|(?:" + prefix_boot_image + ")).+$";
+const std::string regex_version = "\\d+(?:\\.\\d+)*";
+const std::string regex_postfix_revision = "-\\S+";
+
+const std::string regex_files_boot_check = "^(?:(?:" + prefix_boot_config + ")|(?:" + prefix_boot_map + ")|(?:" + prefix_boot_image + "))" + regex_version + regex_postfix_revision + "$";
+const std::string regex_files_src_check = "^(?:" + prefix_src + ")\\S+$";
 
 struct version_info
 {
-	version_info(const std::vector<unsigned int> &l_version, const std::string &l_postfix = std::string())
+	version_info(const std::vector<unsigned int> &l_version, const std::string &l_postfix, const std::string &l_revision)
 		: version(l_version),
-		postfix(l_postfix)
+		postfix(l_postfix),
+		revision(l_revision)
 	{
 	}
 
 	std::vector<unsigned int> version;
 	std::string postfix;
+	std::string revision;
 };
 
 bool operator<(const version_info &a, const version_info &b)
@@ -92,13 +83,21 @@ bool operator<(const version_info &a, const version_info &b)
 	{
 		return false;
 	}
+	else if (a.postfix < b.postfix)
+	{
+		return true;
+	}
+	else if (b.postfix < a.postfix)
+	{
+		return false;
+	}
 	else
 	{
-		return (a.postfix < b.postfix);
+		return (a.revision < b.revision);
 	}
 }
 
-std::set<std::string> list_files_in_directory(const std::string &location, const std::string &filter_regex)
+std::set<std::string> list_files_in_directory(const std::string &location, const std::string &filter_regex = std::string())
 {
 	std::set<std::string> files;
 	struct stat buffer;
@@ -145,19 +144,34 @@ std::set<std::string> list_files_in_directory(const std::string &location, const
 
 int main(int argc, char **argv)
 {
-	std::set<std::string> files = list_files_in_directory("/boot", regex_files_boot_check);
-
-	printf("Files in boot:\n");
-
-	for (auto iter = files.begin(); iter != files.end(); ++iter)
-	{
-		printf("%s\n", iter->c_str());
-	}
-
-/*
 	try
 	{
+		std::set<std::string> files = list_files_in_directory(directory_boot, regex_files_boot_check);
 
+		printf("Files in %s:\n", directory_boot.c_str());
+
+		for (auto iter = files.begin(); iter != files.end(); ++iter)
+		{
+			printf("%s\n", iter->c_str());
+		}
+
+		printf("\nDirectories in %s:\n", directory_modules.c_str());
+
+		files = list_files_in_directory(directory_modules);
+
+		for (auto iter = files.begin(); iter != files.end(); ++iter)
+		{
+			printf("%s\n", iter->c_str());
+		}
+
+		printf("\nDirectories in %s:\n", directory_src.c_str());
+
+		files = list_files_in_directory(directory_src, regex_files_src_check);
+
+		for (auto iter = files.begin(); iter != files.end(); ++iter)
+		{
+			printf("%s\n", iter->c_str());
+		}
 	}
 	catch (const std::exception &exc)
 	{
@@ -169,7 +183,6 @@ int main(int argc, char **argv)
 		fprintf(stderr, "Caught unknown exception\n");
 		return -1;
 	}
-*/
 
 	return 0;
 }
