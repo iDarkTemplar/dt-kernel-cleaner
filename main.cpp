@@ -21,6 +21,7 @@
 #include <string>
 #include <vector>
 #include <set>
+#include <functional>
 
 #include <sys/stat.h>
 #include <unistd.h>
@@ -42,13 +43,16 @@ const std::string prefix_boot_image = "vmlinuz-";
 const std::string prefix_src = "linux-";
 
 const std::string regex_version = "\\d+(?:\\.\\d+)*";
-const std::string regex_postfix_revision = "\\S+";
+const std::string regex_revision_and_local_version = "(?:-|_)\\S+";
 
-const std::string regex_files_boot_check = "^(?:(?:" + prefix_boot_config + ")|(?:" + prefix_boot_map + ")|(?:" + prefix_boot_image + "))" + regex_version + "-" + regex_postfix_revision + "$";
-const std::string regex_files_modules_check = "^" + regex_version + "-" + regex_postfix_revision + "$";
-const std::string regex_files_src_check = "^(?:" + prefix_src + ")" + regex_version + "-" + regex_postfix_revision + "$";
+const std::string regex_files_boot_check = "^(?:(?:" + prefix_boot_config + ")|(?:" + prefix_boot_map + ")|(?:" + prefix_boot_image + "))" + regex_version + regex_revision_and_local_version + "$";
+const std::string regex_files_modules_check = "^" + regex_version + regex_revision_and_local_version + "$";
+const std::string regex_files_src_check = "^(?:" + prefix_src + ")" + regex_version + regex_revision_and_local_version + "$";
 
-const std::string regex_files_src_capture = "^(?:" + prefix_src + ")(" + regex_version + ")-(" + regex_postfix_revision + ")$";
+const std::string regex_files_boot_capture = "^(?:(?:" + prefix_boot_config + ")|(?:" + prefix_boot_map + ")|(?:" + prefix_boot_image + "))(" + regex_version + ")(" + regex_revision_and_local_version + ")$";
+const std::string regex_files_modules_capture = "^(" + regex_version + ")(" + regex_revision_and_local_version + ")$";
+const std::string regex_files_src_capture = "^(?:" + prefix_src + ")(" + regex_version + ")(" + regex_revision_and_local_version + ")$";
+const std::string regex_input_capture = "^(" + regex_version + ")((?:" + regex_revision_and_local_version + ")?)$";
 
 typedef unsigned int version_info_type;
 
@@ -83,8 +87,6 @@ struct version_info
 			{
 				str << "." << *iter;
 			}
-
-			str << "-";
 		}
 
 		str << revision << local_version;
@@ -93,7 +95,7 @@ struct version_info
 	}
 };
 
-struct VersionLess
+struct VersionLess: std::binary_function<std::vector<version_info_type>, std::vector<version_info_type>, bool>
 {
 	bool operator()(const std::vector<version_info_type> &lhs, const std::vector<version_info_type> &rhs) const
 	{
@@ -111,16 +113,6 @@ struct VersionLess
 		}
 
 		return (iter_rhs != iter_rhs_end);
-		/*
-		if (iter_rhs != iter_rhs_end)
-		{
-			return true;
-		}
-		else if (iter_lhs != iter_lhs_end)
-		{
-			return false;
-		}
-		*/
 	}
 };
 
@@ -209,95 +201,297 @@ std::set<std::string> list_files_in_directory(const std::string &location, const
 	return files;
 }
 
-std::set<version_info> src_version;
+std::vector<version_info_type> convertStringToVersion(const std::string &version_string)
+{
+
+	std::vector<version_info_type> version_vector;
+
+	size_t pos = 0;
+	size_t last_pos = 0;
+
+	for (;;)
+	{
+		pos = version_string.find('.', last_pos);
+
+		version_vector.push_back(boost::lexical_cast<version_info_type>(version_string.substr(last_pos, pos - last_pos)));
+
+		if (pos == std::string::npos)
+		{
+			break;
+		}
+
+		last_pos = pos + 1;
+	}
+
+	return version_vector;
+}
+
+//       kernel version,                          kernel revision
 std::map<std::vector<version_info_type>, std::set<std::string>, VersionLess> kernel_src_versions;
 //       kernel version,                          kernel revision,      kernel local version
 std::map<std::vector<version_info_type>, std::map<std::string, std::set<std::string> >, VersionLess> kernel_versions_tree;
+
+void print_help(const char *name)
+{
+	printf("USAGE: %s [options] kernel_version"
+	       "Options:\n"
+	       "\t[-h] --help - shows this info\n"
+	       "\t[-l] --list-only - list found kernel versions and exit. Do not specify kernel versions with this option\n"
+	       "\t[-v] --verbose - list found files and also print actions before executing them\n"
+	       "\t[-n] --dryrun - do not execute actions, only print them"
+	       "\t[-k] --keep-vmlinuzold - do not remove vmlinuz.old symlink if it becomes obsolete"
+	       "\n"
+	       "\tkernel version is in format d.d.d-revision or just d.d.d (number of digits is variable)\n",
+	       name);
+}
 
 int main(int argc, char **argv)
 {
 	try
 	{
-		std::set<std::string> files = list_files_in_directory(directory_boot, regex_files_boot_check);
+		bool list_only = false;
+		bool verbose = false;
+		bool dry_run = false;
+		bool help = false;
+		bool do_not_touch_vmlinuzold = false;
 
-		printf("Files in %s:\n", directory_boot.c_str());
+		std::set<version_info> selected_kernels;
 
-		for (auto iter = files.begin(); iter != files.end(); ++iter)
+		for (int i = 1; i < argc; ++i)
 		{
-			printf("%s\n", iter->c_str());
+			if ((strcmp(argv[i],"--help") == 0) || (strcmp(argv[i], "-h") == 0))
+			{
+				help = true;
+			}
+			else if ((strcmp(argv[i],"--list-only") == 0) || (strcmp(argv[i], "-l") == 0))
+			{
+				list_only = true;
+			}
+			else if ((strcmp(argv[i],"--verbose") == 0) || (strcmp(argv[i], "-v") == 0))
+			{
+				verbose = true;
+			}
+			else if ((strcmp(argv[i],"--dryrun") == 0) || (strcmp(argv[i], "-n") == 0))
+			{
+				dry_run = true;
+			}
+			else if ((strcmp(argv[i],"--keep-vmlinuzold") == 0) || (strcmp(argv[i], "-k") == 0))
+			{
+				do_not_touch_vmlinuzold = true;
+			}
+			else
+			{
+				boost::cmatch reg_results;
+
+				if (boost::regex_match(argv[i], reg_results, boost::regex(regex_input_capture)))
+				{
+					version_info version(convertStringToVersion(reg_results.str(1)), reg_results.str(2));
+
+					if (selected_kernels.find(version) == selected_kernels.end())
+					{
+						selected_kernels.insert(version);
+					}
+					else
+					{
+						printf("Kernel version is specified multiple times: %s\n", version.toString().c_str());
+						return 0;
+					}
+				}
+				else
+				{
+					printf("Unknown option or invalid format of kernel version: %s, try %s --help for more information\n", argv[i], argv[0]);
+					return 0;
+				}
+			}
 		}
 
-		printf("\nDirectories in %s:\n", directory_modules.c_str());
-
-		files = list_files_in_directory(directory_modules, regex_files_modules_check);
-
-		for (auto iter = files.begin(); iter != files.end(); ++iter)
+		if (help)
 		{
-			printf("%s\n", iter->c_str());
+			print_help(argv[0]);
+			return 0;
 		}
 
-		printf("\nDirectories in %s:\n", directory_src.c_str());
+		if ((!list_only) && selected_kernels.empty())
+		{
+			printf("Error: no kernel versions or other actions are specified. Try %s --help for more information\n", argv[0]);
+			return -1;
+		}
 
-		// First, get all kernel source versions. There's no way to differ between revision and local version without checking against available kernel source versions
-		files = list_files_in_directory(directory_src, regex_files_src_check);
+		if (list_only && (!selected_kernels.empty()))
+		{
+			printf("Error: \"--list-only\" option is specified with kernel versions. Try %s --help for more information\n", argv[0]);
+			return -1;
+		}
+
+		// First, get all kernel source versions from /usr/src. There's no way to differ between revision and local version without checking against available kernel source versions
+		if (verbose)
+		{
+			printf("Directories in %s:\n", directory_src.c_str());
+		}
+
+		std::set<std::string> files = list_files_in_directory(directory_src, regex_files_src_check);
 
 		for (auto iter = files.begin(); iter != files.end(); ++iter)
 		{
-			printf("%s\n", iter->c_str());
+			if (verbose)
+			{
+				printf("%s\n", iter->c_str());
+			}
 
 			boost::smatch reg_results;
 
 			if (boost::regex_match(*iter, reg_results, boost::regex(regex_files_src_capture)))
 			{
-				std::string version_string = reg_results.str(1);
+				std::vector<version_info_type> version_vector = convertStringToVersion(reg_results.str(1));
 				std::string revision_string = reg_results.str(2);
 
-				std::vector<version_info_type> version_vector;
+				kernel_src_versions[version_vector].insert(revision_string);
+			}
+		}
 
-				size_t pos = 0;
-				size_t last_pos = 0;
+		// Now check /boot
+		if (verbose)
+		{
+			printf("\nFiles in %s:\n", directory_boot.c_str());
+		}
 
-				for (;;)
+		files = list_files_in_directory(directory_boot, regex_files_boot_check);
+
+		for (auto iter = files.begin(); iter != files.end(); ++iter)
+		{
+			if (verbose)
+			{
+				printf("%s\n", iter->c_str());
+			}
+
+			boost::smatch reg_results;
+
+			if (boost::regex_match(*iter, reg_results, boost::regex(regex_files_boot_capture)))
+			{
+				std::vector<version_info_type> version_vector = convertStringToVersion(reg_results.str(1));
+				std::string revision_and_local_version_string = reg_results.str(2);
+
+				auto kernel_src_version = kernel_src_versions.find(version_vector);
+				if (kernel_src_version != kernel_src_versions.end())
 				{
-					pos = version_string.find('.', last_pos);
+					auto kernel_src_revision = kernel_src_version->second.begin();
+					auto kernel_src_revision_end = kernel_src_version->second.end();
 
-					version_vector.push_back(boost::lexical_cast<version_info_type>(version_string.substr(last_pos, pos - last_pos)));
-
-					if (pos == std::string::npos)
+					for ( ; kernel_src_revision != kernel_src_revision_end; ++kernel_src_revision)
 					{
-						break;
+						if (kernel_src_revision->compare(0, std::string::npos, revision_and_local_version_string, 0, kernel_src_revision->length()) == 0)
+						{
+							break;
+						}
 					}
 
-					last_pos = pos + 1;
+					if (kernel_src_revision != kernel_src_revision_end)
+					{
+						kernel_versions_tree[version_vector][*kernel_src_revision].insert(revision_and_local_version_string.substr(kernel_src_revision->length()));
+					}
+					else
+					{
+						kernel_versions_tree[version_vector][revision_and_local_version_string].insert(std::string());
+					}
 				}
-
-				src_version.insert(version_info(version_vector, revision_string));
-				kernel_src_versions[version_vector].insert(revision_string);
-				kernel_versions_tree[version_vector][revision_string].insert(std::string());
-			}
-		}
-
-		for (auto iter = src_version.begin(); iter != src_version.end(); ++iter)
-		{
-			printf("kernel version: %s\n", iter->toString().c_str());
-		}
-
-		for (auto iter_version = kernel_src_versions.begin(); iter_version != kernel_src_versions.end(); ++iter_version)
-		{
-			for (auto iter_revision = iter_version->second.begin(); iter_revision != iter_version->second.end(); ++iter_revision)
-			{
-				printf("kernel version from map: %s\n", version_info(iter_version->first, *iter_revision).toString().c_str());
-			}
-		}
-
-		for (auto iter_version = kernel_versions_tree.begin(); iter_version != kernel_versions_tree.end(); ++iter_version)
-		{
-			for (auto iter_revision = iter_version->second.begin(); iter_revision != iter_version->second.end(); ++iter_revision)
-			{
-				for (auto iter_local_version = iter_revision->second.begin(); iter_local_version != iter_revision->second.end(); ++iter_local_version)
+				else
 				{
-					printf("kernel version from tree: %s\n", version_info(iter_version->first, iter_revision->first, *iter_local_version).toString().c_str());
+					kernel_versions_tree[version_vector][revision_and_local_version_string].insert(std::string());
 				}
+			}
+		}
+
+		// Now check /lib/modules
+		if (verbose)
+		{
+			printf("\nDirectories in %s:\n", directory_modules.c_str());
+		}
+
+		files = list_files_in_directory(directory_modules, regex_files_modules_check);
+
+		for (auto iter = files.begin(); iter != files.end(); ++iter)
+		{
+			if (verbose)
+			{
+				printf("%s\n", iter->c_str());
+			}
+
+			boost::smatch reg_results;
+
+			if (boost::regex_match(*iter, reg_results, boost::regex(regex_files_modules_capture)))
+			{
+				std::vector<version_info_type> version_vector = convertStringToVersion(reg_results.str(1));
+				std::string revision_and_local_version_string = reg_results.str(2);
+
+				auto kernel_src_version = kernel_src_versions.find(version_vector);
+				if (kernel_src_version != kernel_src_versions.end())
+				{
+					auto kernel_src_revision = kernel_src_version->second.begin();
+					auto kernel_src_revision_end = kernel_src_version->second.end();
+
+					for ( ; kernel_src_revision != kernel_src_revision_end; ++kernel_src_revision)
+					{
+						if (kernel_src_revision->compare(0, std::string::npos, revision_and_local_version_string, 0, kernel_src_revision->length()) == 0)
+						{
+							break;
+						}
+					}
+
+					if (kernel_src_revision != kernel_src_revision_end)
+					{
+						kernel_versions_tree[version_vector][*kernel_src_revision].insert(revision_and_local_version_string.substr(kernel_src_revision->length()));
+					}
+					else
+					{
+						kernel_versions_tree[version_vector][revision_and_local_version_string].insert(std::string());
+					}
+				}
+				else
+				{
+					kernel_versions_tree[version_vector][revision_and_local_version_string].insert(std::string());
+				}
+			}
+		}
+
+		if (verbose)
+		{
+			printf("\n");
+		}
+
+		if (list_only)
+		{
+			printf("kernel source tree for versions:\n");
+
+			for (auto iter_version = kernel_src_versions.begin(); iter_version != kernel_src_versions.end(); ++iter_version)
+			{
+
+				for (auto iter_revision = iter_version->second.begin(); iter_revision != iter_version->second.end(); ++iter_revision)
+				{
+					printf("%s\n", version_info(iter_version->first, *iter_revision).toString().c_str());
+				}
+			}
+
+			printf("\nkernel image and module versions:\n");
+
+			for (auto iter_version = kernel_versions_tree.begin(); iter_version != kernel_versions_tree.end(); ++iter_version)
+			{
+				for (auto iter_revision = iter_version->second.begin(); iter_revision != iter_version->second.end(); ++iter_revision)
+				{
+					for (auto iter_local_version = iter_revision->second.begin(); iter_local_version != iter_revision->second.end(); ++iter_local_version)
+					{
+						printf("%s\n", version_info(iter_version->first, iter_revision->first, *iter_local_version).toString().c_str());
+					}
+				}
+			}
+		}
+		else
+		{
+			auto kernel_version_iter = selected_kernels.begin();
+			auto kernel_version_iter_end = selected_kernels.end();
+
+			for (; kernel_version_iter != kernel_version_iter_end; ++kernel_version_iter)
+			{
+				// TODO: print cleaning action, and then do it (using boost::filesystem maybe? Or plain filesystem operations?)
 			}
 		}
 	}
