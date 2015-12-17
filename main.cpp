@@ -28,6 +28,7 @@
 #include <dirent.h>
 #include <string.h>
 #include <stdio.h>
+#include <sys/utsname.h>
 
 #include <boost/lexical_cast.hpp>
 #include <boost/regex.hpp>
@@ -201,9 +202,53 @@ std::set<std::string> list_files_in_directory(const std::string &location, const
 	return files;
 }
 
+void find_all_files_and_dirs(const std::string &location, std::set<std::string> &files, std::set<std::string> &directories)
+{
+	struct stat buffer;
+
+	if (lstat(location.c_str(), &buffer) != -1)
+	{
+		if (S_ISDIR(buffer.st_mode))
+		{
+			DIR *dirp;
+
+			directories.insert(location);
+
+			if ((dirp = opendir(location.c_str())) != NULL)
+			{
+				try
+				{
+					struct dirent *dp;
+
+					do
+					{
+						if ((dp = readdir(dirp)) != NULL)
+						{
+							if ((strcmp(dp->d_name, ".") != 0) && (strcmp(dp->d_name, "..") != 0))
+							{
+								find_all_files_and_dirs(location + "/" + std::string(dp->d_name), files, directories);
+							}
+						}
+					} while (dp != NULL);
+				}
+				catch (...)
+				{
+					closedir(dirp);
+					throw;
+				}
+
+				closedir(dirp);
+			}
+		}
+		else /* if (S_ISREG(buffer.st_mode) || S_ISLNK(buffer.st_mode)) */
+		{
+			files.insert(location);
+		}
+	}
+}
+
 std::vector<version_info_type> convertStringToVersion(const std::string &version_string)
 {
-
 	std::vector<version_info_type> version_vector;
 
 	size_t pos = 0;
@@ -238,8 +283,10 @@ void print_help(const char *name)
 	       "\t[-h] --help - shows this info\n"
 	       "\t[-l] --list-only - list found kernel versions and exit. Do not specify kernel versions with this option\n"
 	       "\t[-v] --verbose - list found files and also print actions before executing them\n"
-	       "\t[-n] --dryrun - do not execute actions, only print them"
-	       "\t[-k] --keep-vmlinuzold - do not remove vmlinuz.old symlink if it becomes obsolete"
+	       "\t[-n] --dryrun - do not execute actions, only print them\n"
+	       "\t[-k] --keep-vmlinuzold - do not remove vmlinuz.old symlink if it becomes obsolete\n"
+	       "\t[-c] --clean-old - remove all kernels except the one currently running\n"
+	       "\t[-s] --keep-sources - keep sources even if no kernel is built out of those sources is present\n"
 	       "\n"
 	       "\tkernel version is in format d.d.d-revision or just d.d.d (number of digits is variable)\n",
 	       name);
@@ -254,6 +301,8 @@ int main(int argc, char **argv)
 		bool dry_run = false;
 		bool help = false;
 		bool do_not_touch_vmlinuzold = false;
+		bool clean_old = false;
+		bool keep_sources = false;
 
 		std::set<version_info> selected_kernels;
 
@@ -278,6 +327,14 @@ int main(int argc, char **argv)
 			else if ((strcmp(argv[i],"--keep-vmlinuzold") == 0) || (strcmp(argv[i], "-k") == 0))
 			{
 				do_not_touch_vmlinuzold = true;
+			}
+			else if ((strcmp(argv[i],"--clean-old") == 0) || (strcmp(argv[i], "-c") == 0))
+			{
+				clean_old = true;
+			}
+			else if ((strcmp(argv[i],"--keep-sources") == 0) || (strcmp(argv[i], "-s") == 0))
+			{
+				keep_sources = true;
 			}
 			else
 			{
@@ -311,15 +368,15 @@ int main(int argc, char **argv)
 			return 0;
 		}
 
-		if ((!list_only) && selected_kernels.empty())
+		if ((!list_only) && selected_kernels.empty() && (!clean_old))
 		{
 			printf("Error: no kernel versions or other actions are specified. Try %s --help for more information\n", argv[0]);
 			return -1;
 		}
 
-		if (list_only && (!selected_kernels.empty()))
+		if (list_only && (!selected_kernels.empty()) && clean_old)
 		{
-			printf("Error: \"--list-only\" option is specified with kernel versions. Try %s --help for more information\n", argv[0]);
+			printf("Error: too much incompatible action options are specified. Try %s --help for more information\n", argv[0]);
 			return -1;
 		}
 
@@ -464,7 +521,6 @@ int main(int argc, char **argv)
 
 			for (auto iter_version = kernel_src_versions.begin(); iter_version != kernel_src_versions.end(); ++iter_version)
 			{
-
 				for (auto iter_revision = iter_version->second.begin(); iter_revision != iter_version->second.end(); ++iter_revision)
 				{
 					printf("%s\n", version_info(iter_version->first, *iter_revision).toString().c_str());
@@ -486,12 +542,97 @@ int main(int argc, char **argv)
 		}
 		else
 		{
+			if (clean_old)
+			{
+				// TODO: clean all kernel versions, and then put all except current one into removal list
+				// man 3 uname
+			}
+
 			auto kernel_version_iter = selected_kernels.begin();
 			auto kernel_version_iter_end = selected_kernels.end();
 
 			for (; kernel_version_iter != kernel_version_iter_end; ++kernel_version_iter)
 			{
-				// TODO: print cleaning action, and then do it (using boost::filesystem maybe? Or plain filesystem operations?)
+				// TODO: check that such kernel exists, or such kernel sources exist and no -s is set
+				std::string version_str = kernel_version_iter->toString();
+				printf("Removing kernel version %s\n", version_str.c_str());
+
+				std::set<std::string> files;
+				std::set<std::string> directories;
+
+				find_all_files_and_dirs(directory_modules + "/" + version_str, files, directories);
+
+				// clean everything in /boot
+				// TODO: process return codes
+				if (verbose)
+				{
+					printf("Removing file %s\n", (directory_boot + "/" + prefix_boot_config + version_str).c_str());
+				}
+
+				if (!dry_run)
+				{
+					unlink((directory_boot + "/" + prefix_boot_config + version_str).c_str());
+				}
+
+				if (verbose)
+				{
+					printf("Removing file %s\n", (directory_boot + "/" + prefix_boot_map + version_str).c_str());
+				}
+
+				if (!dry_run)
+				{
+					unlink((directory_boot + "/" + prefix_boot_map + version_str).c_str());
+				}
+
+				if (verbose)
+				{
+					printf("Removing file %s\n", (directory_boot + "/" + prefix_boot_image + version_str).c_str());
+				}
+
+				if (!dry_run)
+				{
+					unlink((directory_boot + "/" + prefix_boot_image + version_str).c_str());
+				}
+
+				// clean everything in /lib/modules
+				auto files_end = files.end();
+				for (auto files_cur = files.begin(); files_cur != files_end; ++files_cur)
+				{
+					if (verbose)
+					{
+						printf("Removing file %s\n", files_cur->c_str());
+					}
+
+					if (!dry_run)
+					{
+						unlink(files_cur->c_str());
+					}
+				}
+
+				// go in reverse order to make sure that top-most directories are removed last
+				auto dirs_end = directories.rend();
+				for (auto dirs_cur = directories.rbegin(); dirs_cur != dirs_end; ++dirs_cur)
+				{
+					if (verbose)
+					{
+						printf("Removing dir %s\n", dirs_cur->c_str());
+					}
+
+					if (!dry_run)
+					{
+						rmdir(dirs_cur->c_str());
+					}
+				}
+
+				if (!keep_sources)
+				{
+					// TODO: if -s is not set, check if no other kernels use that source and remove source
+				}
+			}
+
+			if (!do_not_touch_vmlinuzold)
+			{
+				// TODO: check if vmlinuz.old is no longer a valid link and remove it
 			}
 		}
 	}
