@@ -32,6 +32,7 @@
 
 #include <boost/lexical_cast.hpp>
 #include <boost/regex.hpp>
+#include <boost/optional.hpp>
 
 const std::string directory_boot = "/boot";
 const std::string directory_modules = "/lib/modules";
@@ -57,6 +58,29 @@ const std::string regex_input_capture = "^(" + regex_version + ")((?:" + regex_r
 
 typedef unsigned int version_info_type;
 
+std::string versionToString(const std::vector<version_info_type> &version)
+{
+	std::stringstream str;
+
+	std::vector<version_info_type>::const_iterator iter, iter_end;
+
+	iter     = version.begin();
+	iter_end = version.end();
+
+	if (iter != iter_end)
+	{
+		str << *iter;
+		++iter;
+
+		for (; iter != iter_end; ++iter)
+		{
+			str << "." << *iter;
+		}
+	}
+
+	return str.str();
+}
+
 struct version_info
 {
 	version_info(const std::vector<version_info_type> &l_version, const std::string &l_revision, const std::string &l_local_version = std::string())
@@ -72,27 +96,7 @@ struct version_info
 
 	std::string toString() const
 	{
-		std::stringstream str;
-
-		std::vector<version_info_type>::const_iterator iter, iter_end;
-
-		iter     = version.begin();
-		iter_end = version.end();
-
-		if (iter != iter_end)
-		{
-			str << *iter;
-			++iter;
-
-			for (; iter != iter_end; ++iter)
-			{
-				str << "." << *iter;
-			}
-		}
-
-		str << revision << local_version;
-
-		return str.str();
+		return versionToString(version) + revision + local_version;
 	}
 };
 
@@ -553,86 +557,199 @@ int main(int argc, char **argv)
 
 			for (; kernel_version_iter != kernel_version_iter_end; ++kernel_version_iter)
 			{
-				// TODO: check that such kernel exists, or such kernel sources exist and no -s is set
-				std::string version_str = kernel_version_iter->toString();
-				printf("Removing kernel version %s\n", version_str.c_str());
+				boost::optional<version_info> found_kernel;
+				boost::optional<version_info> found_kernel_sources;
 
-				std::set<std::string> files;
-				std::set<std::string> directories;
-
-				find_all_files_and_dirs(directory_modules + "/" + version_str, files, directories);
-
-				// clean everything in /boot
-				// TODO: process return codes
-				if (verbose)
 				{
-					printf("Removing file %s\n", (directory_boot + "/" + prefix_boot_config + version_str).c_str());
+					std::vector<version_info_type> version_vector = kernel_version_iter->version;
+					std::string revision_and_local_version_string = kernel_version_iter->revision + kernel_version_iter->local_version;
+
+					auto kernel_version = kernel_versions_tree.find(version_vector);
+					if (kernel_version != kernel_versions_tree.end())
+					{
+						auto kernel_revision = kernel_version->second.begin();
+						auto kernel_revision_end = kernel_version->second.end();
+
+						for ( ; kernel_revision != kernel_revision_end; ++kernel_revision)
+						{
+							if (kernel_revision->first.compare(0, std::string::npos, revision_and_local_version_string, 0, kernel_revision->first.length()) == 0)
+							{
+								std::string kernel_local_version_string = revision_and_local_version_string.substr(kernel_revision->first.length());
+
+								auto kernel_local_version = kernel_revision->second.find(kernel_local_version_string);
+								if (kernel_local_version != kernel_revision->second.end())
+								{
+									found_kernel = version_info(version_vector, kernel_revision->first, kernel_local_version_string);
+									break;
+								}
+							}
+						}
+					}
+
+					auto kernel_src_version = kernel_src_versions.find(version_vector);
+					if (kernel_src_version != kernel_src_versions.end())
+					{
+						auto kernel_src_revision = kernel_src_version->second.begin();
+						auto kernel_src_revision_end = kernel_src_version->second.end();
+
+						for ( ; kernel_src_revision != kernel_src_revision_end; ++kernel_src_revision)
+						{
+							if (*kernel_src_revision == revision_and_local_version_string)
+							{
+								found_kernel_sources = version_info(version_vector, revision_and_local_version_string);
+								break;
+							}
+						}
+					}
 				}
 
-				if (!dry_run)
+				if (found_kernel)
 				{
-					unlink((directory_boot + "/" + prefix_boot_config + version_str).c_str());
-				}
+					std::string version_str = kernel_version_iter->toString();
+					printf("Removing kernel version %s\n", version_str.c_str());
 
-				if (verbose)
-				{
-					printf("Removing file %s\n", (directory_boot + "/" + prefix_boot_map + version_str).c_str());
-				}
+					std::set<std::string> files;
+					std::set<std::string> directories;
 
-				if (!dry_run)
-				{
-					unlink((directory_boot + "/" + prefix_boot_map + version_str).c_str());
-				}
+					find_all_files_and_dirs(directory_modules + "/" + version_str, files, directories);
 
-				if (verbose)
-				{
-					printf("Removing file %s\n", (directory_boot + "/" + prefix_boot_image + version_str).c_str());
-				}
-
-				if (!dry_run)
-				{
-					unlink((directory_boot + "/" + prefix_boot_image + version_str).c_str());
-				}
-
-				// clean everything in /lib/modules
-				auto files_end = files.end();
-				for (auto files_cur = files.begin(); files_cur != files_end; ++files_cur)
-				{
+					// clean everything in /boot
+					// TODO: process return codes
 					if (verbose)
 					{
-						printf("Removing file %s\n", files_cur->c_str());
+						printf("Removing file %s\n", (directory_boot + "/" + prefix_boot_config + version_str).c_str());
 					}
 
 					if (!dry_run)
 					{
-						unlink(files_cur->c_str());
+						unlink((directory_boot + "/" + prefix_boot_config + version_str).c_str());
 					}
-				}
 
-				// go in reverse order to make sure that top-most directories are removed last
-				auto dirs_end = directories.rend();
-				for (auto dirs_cur = directories.rbegin(); dirs_cur != dirs_end; ++dirs_cur)
-				{
 					if (verbose)
 					{
-						printf("Removing dir %s\n", dirs_cur->c_str());
+						printf("Removing file %s\n", (directory_boot + "/" + prefix_boot_map + version_str).c_str());
 					}
 
 					if (!dry_run)
 					{
-						rmdir(dirs_cur->c_str());
+						unlink((directory_boot + "/" + prefix_boot_map + version_str).c_str());
 					}
+
+					if (verbose)
+					{
+						printf("Removing file %s\n", (directory_boot + "/" + prefix_boot_image + version_str).c_str());
+					}
+
+					if (!dry_run)
+					{
+						unlink((directory_boot + "/" + prefix_boot_image + version_str).c_str());
+					}
+
+					// clean everything in /lib/modules
+					auto files_end = files.end();
+					for (auto files_cur = files.begin(); files_cur != files_end; ++files_cur)
+					{
+						if (verbose)
+						{
+							printf("Removing file %s\n", files_cur->c_str());
+						}
+
+						if (!dry_run)
+						{
+							unlink(files_cur->c_str());
+						}
+					}
+
+					// go in reverse order to make sure that top-most directories are removed last
+					auto dirs_end = directories.rend();
+					for (auto dirs_cur = directories.rbegin(); dirs_cur != dirs_end; ++dirs_cur)
+					{
+						if (verbose)
+						{
+							printf("Removing dir %s\n", dirs_cur->c_str());
+						}
+
+						if (!dry_run)
+						{
+							rmdir(dirs_cur->c_str());
+						}
+					}
+
+					// remove kernel from lists
+					kernel_versions_tree[found_kernel->version][found_kernel->revision].erase(found_kernel->local_version);
 				}
 
-				if (!keep_sources)
+				if ((!keep_sources)
+					&& ((found_kernel && kernel_versions_tree[found_kernel->version][found_kernel->revision].empty())
+						|| ((!found_kernel) && found_kernel_sources)))
 				{
-					// TODO: if -s is not set, check if no other kernels use that source and remove source
+					std::string version_str;
+
+					if (found_kernel)
+					{
+						version_str = versionToString(found_kernel->version) + found_kernel->revision;
+					}
+					else
+					{
+						version_str = found_kernel_sources->toString();
+					}
+
+					printf("Removing kernel sources version %s\n", version_str.c_str());
+
+					std::set<std::string> files;
+					std::set<std::string> directories;
+
+					find_all_files_and_dirs(directory_src + "/" + prefix_src + version_str, files, directories);
+
+					// clean everything in /usr/src
+					auto files_end = files.end();
+					for (auto files_cur = files.begin(); files_cur != files_end; ++files_cur)
+					{
+						if (verbose)
+						{
+							printf("Removing file %s\n", files_cur->c_str());
+						}
+
+						if (!dry_run)
+						{
+							unlink(files_cur->c_str());
+						}
+					}
+
+					// go in reverse order to make sure that top-most directories are removed last
+					auto dirs_end = directories.rend();
+					for (auto dirs_cur = directories.rbegin(); dirs_cur != dirs_end; ++dirs_cur)
+					{
+						if (verbose)
+						{
+							printf("Removing dir %s\n", dirs_cur->c_str());
+						}
+
+						if (!dry_run)
+						{
+							rmdir(dirs_cur->c_str());
+						}
+					}
 				}
 			}
 
 			if (!do_not_touch_vmlinuzold)
 			{
-				// TODO: check if vmlinuz.old is no longer a valid link and remove it
+				const std::string vmlinuzold_name = "/boot/vmlinuz.old";
+				struct stat buffer;
+
+				if ((stat(vmlinuzold_name.c_str(), &buffer) != -1) && (S_ISLNK(buffer.st_mode)))
+				{
+					if (verbose)
+					{
+						printf("Removing file %s\n", vmlinuzold_name.c_str());
+					}
+
+					if (!dry_run)
+					{
+						unlink(vmlinuzold_name.c_str());
+					}
+				}
 			}
 		}
 	}
