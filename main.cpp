@@ -282,7 +282,8 @@ std::map<std::vector<version_info_type>, std::map<std::string, std::set<std::str
 
 void print_help(const char *name)
 {
-	printf("USAGE: %s [options] kernel_version"
+	fprintf(stderr,
+	       "USAGE: %s [options] kernel_version"
 	       "Options:\n"
 	       "\t[-h] --help - shows this info\n"
 	       "\t[-l] --list-only - list found kernel versions and exit. Do not specify kernel versions with this option\n"
@@ -354,13 +355,13 @@ int main(int argc, char **argv)
 					}
 					else
 					{
-						printf("Kernel version is specified multiple times: %s\n", version.toString().c_str());
+						fprintf(stderr, "Kernel version is specified multiple times: %s\n", version.toString().c_str());
 						return 0;
 					}
 				}
 				else
 				{
-					printf("Unknown option or invalid format of kernel version: %s, try %s --help for more information\n", argv[i], argv[0]);
+					fprintf(stderr, "Unknown option or invalid format of kernel version: %s, try %s --help for more information\n", argv[i], argv[0]);
 					return 0;
 				}
 			}
@@ -374,13 +375,13 @@ int main(int argc, char **argv)
 
 		if ((!list_only) && selected_kernels.empty() && (!clean_old))
 		{
-			printf("Error: no kernel versions or other actions are specified. Try %s --help for more information\n", argv[0]);
+			fprintf(stderr, "Error: no kernel versions or other actions are specified. Try %s --help for more information\n", argv[0]);
 			return -1;
 		}
 
 		if (list_only && (!selected_kernels.empty()) && clean_old)
 		{
-			printf("Error: too much incompatible action options are specified. Try %s --help for more information\n", argv[0]);
+			fprintf(stderr, "Error: too much incompatible action options are specified. Try %s --help for more information\n", argv[0]);
 			return -1;
 		}
 
@@ -548,8 +549,52 @@ int main(int argc, char **argv)
 		{
 			if (clean_old)
 			{
-				// TODO: clean all kernel versions, and then put all except current one into removal list
-				// man 3 uname
+				struct utsname name;
+
+				if (uname(&name) == -1)
+				{
+					throw std::runtime_error("uname() call failed");
+				}
+
+				std::string current_version = name.release;
+
+				boost::smatch reg_results;
+
+				if (!boost::regex_match(current_version, reg_results, boost::regex(regex_input_capture)))
+				{
+					std::stringstream str;
+					str << "Failed to parse version string returned by uname(): " << current_version;
+					throw std::runtime_error(str.str());
+				}
+
+				version_info version(convertStringToVersion(reg_results.str(1)), reg_results.str(2));
+
+				selected_kernels.clear();
+
+				auto kernel_version = kernel_versions_tree.begin();
+				auto kernel_version_end = kernel_versions_tree.end();
+
+				for ( ; kernel_version != kernel_version_end; ++kernel_version)
+				{
+					auto kernel_revision = kernel_version->second.begin();
+					auto kernel_revision_end = kernel_version->second.end();
+
+					for ( ; kernel_revision != kernel_revision_end; ++kernel_revision)
+					{
+						auto kernel_local_version = kernel_revision->second.begin();
+						auto kernel_local_version_end = kernel_revision->second.end();
+
+						for ( ; kernel_local_version != kernel_local_version_end; ++kernel_local_version)
+						{
+							version_info found_version(kernel_version->first, kernel_revision->first, *kernel_local_version);
+
+							if (version.toString() != found_version.toString())
+							{
+								selected_kernels.insert(found_version);
+							}
+						}
+					}
+				}
 			}
 
 			auto kernel_version_iter = selected_kernels.begin();
@@ -733,6 +778,7 @@ int main(int argc, char **argv)
 				}
 			}
 
+			// TODO: this currently does not work in dry-run, i.e. it does not show that it would remove the symlink due to file it points to not being removed
 			if (!do_not_touch_vmlinuzold)
 			{
 				const std::string vmlinuzold_name = "/boot/vmlinuz.old";
