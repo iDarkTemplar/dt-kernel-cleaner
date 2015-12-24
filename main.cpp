@@ -275,6 +275,22 @@ std::vector<version_info_type> convertStringToVersion(const std::string &version
 	return version_vector;
 }
 
+void remove_file(const std::string &file)
+{
+	if (unlink(file.c_str()) < 0)
+	{
+		fprintf(stderr, "Failed to remove file: %s\n", file.c_str());
+	}
+}
+
+void remove_directory(const std::string &directory)
+{
+	if (rmdir(directory.c_str()) < 0)
+	{
+		fprintf(stderr, "Failed to remove directory: %s\n", directory.c_str());
+	}
+}
+
 //       kernel version,                          kernel revision
 std::map<std::vector<version_info_type>, std::set<std::string>, VersionLess> kernel_src_versions;
 //       kernel version,                          kernel revision,      kernel local version
@@ -659,7 +675,6 @@ int main(int argc, char **argv)
 					find_all_files_and_dirs(directory_modules + "/" + version_str, files, directories);
 
 					// clean everything in /boot
-					// TODO: process return codes
 					if (verbose)
 					{
 						printf("Removing file %s\n", (directory_boot + "/" + prefix_boot_config + version_str).c_str());
@@ -667,7 +682,7 @@ int main(int argc, char **argv)
 
 					if (!dry_run)
 					{
-						unlink((directory_boot + "/" + prefix_boot_config + version_str).c_str());
+						remove_file(directory_boot + "/" + prefix_boot_config + version_str);
 					}
 
 					if (verbose)
@@ -677,7 +692,7 @@ int main(int argc, char **argv)
 
 					if (!dry_run)
 					{
-						unlink((directory_boot + "/" + prefix_boot_map + version_str).c_str());
+						remove_file(directory_boot + "/" + prefix_boot_map + version_str);
 					}
 
 					if (verbose)
@@ -687,7 +702,7 @@ int main(int argc, char **argv)
 
 					if (!dry_run)
 					{
-						unlink((directory_boot + "/" + prefix_boot_image + version_str).c_str());
+						remove_file(directory_boot + "/" + prefix_boot_image + version_str);
 					}
 
 					// clean everything in /lib/modules
@@ -701,7 +716,7 @@ int main(int argc, char **argv)
 
 						if (!dry_run)
 						{
-							unlink(files_cur->c_str());
+							remove_file(*files_cur);
 						}
 					}
 
@@ -716,7 +731,7 @@ int main(int argc, char **argv)
 
 						if (!dry_run)
 						{
-							rmdir(dirs_cur->c_str());
+							remove_directory(*dirs_cur);
 						}
 					}
 
@@ -724,6 +739,7 @@ int main(int argc, char **argv)
 					kernel_versions_tree[found_kernel->version][found_kernel->revision].erase(found_kernel->local_version);
 				}
 
+				// TODO: when removing kernel sources make sure to remove all kernel files built from these sources
 				if ((!keep_sources)
 					&& ((found_kernel && kernel_versions_tree[found_kernel->version][found_kernel->revision].empty())
 						|| ((!found_kernel) && found_kernel_sources)))
@@ -757,7 +773,7 @@ int main(int argc, char **argv)
 
 						if (!dry_run)
 						{
-							unlink(files_cur->c_str());
+							remove_file(*files_cur);
 						}
 					}
 
@@ -772,7 +788,7 @@ int main(int argc, char **argv)
 
 						if (!dry_run)
 						{
-							rmdir(dirs_cur->c_str());
+							remove_directory(*dirs_cur);
 						}
 					}
 				}
@@ -793,7 +809,7 @@ int main(int argc, char **argv)
 
 					if (!dry_run)
 					{
-						unlink(vmlinuzold_name.c_str());
+						remove_file(vmlinuzold_name);
 					}
 				}
 			}
