@@ -4,7 +4,7 @@ cmake_minimum_required( VERSION 2.8.8 )
 
 set(DTCK_VERSION_MAJOR 1)
 set(DTCK_VERSION_MINOR 0)
-set(DTCK_VERSION_PATCH 0)
+set(DTCK_VERSION_PATCH 1)
 set(DTCK_VERSION "${DTCK_VERSION_MAJOR}.${DTCK_VERSION_MINOR}.${DTCK_VERSION_PATCH}")
 
 set(CPACK_PACKAGE_VERSION_MAJOR ${DTCK_VERSION_MAJOR})
@@ -81,4 +81,4 @@ target_link_libraries( dt-kernel-cleaner ${Boost_LIBRARIES} )
 #endforeach (CURRENT_TEST)
 
 # installation config
-install(TARGETS dt-kernel-cleaner RUNTIME DESTINATION ${BIN_INSTALL_DIR})
+install(TARGETS dt-kernel-cleaner RUNTIME DESTINATION ${SBIN_INSTALL_DIR})
