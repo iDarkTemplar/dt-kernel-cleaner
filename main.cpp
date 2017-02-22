@@ -299,7 +299,7 @@ std::map<std::vector<version_info_type>, std::map<std::string, std::set<std::str
 void print_help(const char *name)
 {
 	fprintf(stderr,
-	       "USAGE: %s [options] kernel_version"
+	       "USAGE: %s [options] kernel_version\n"
 	       "Options:\n"
 	       "\t[-h] --help - shows this info\n"
 	       "\t[-l] --list-only - list found kernel versions and exit. Do not specify kernel versions with this option\n"
@@ -618,7 +618,8 @@ int main(int argc, char **argv)
 
 			for (; kernel_version_iter != kernel_version_iter_end; ++kernel_version_iter)
 			{
-				boost::optional<version_info> found_kernel;
+				bool found_kernels_matched = false;
+				std::set<version_info> found_kernels;
 				boost::optional<version_info> found_kernel_sources;
 
 				{
@@ -640,7 +641,8 @@ int main(int argc, char **argv)
 								auto kernel_local_version = kernel_revision->second.find(kernel_local_version_string);
 								if (kernel_local_version != kernel_revision->second.end())
 								{
-									found_kernel = version_info(version_vector, kernel_revision->first, kernel_local_version_string);
+									found_kernels.insert(version_info(version_vector, kernel_revision->first, kernel_local_version_string));
+									found_kernels_matched = true;
 									break;
 								}
 							}
@@ -664,9 +666,32 @@ int main(int argc, char **argv)
 					}
 				}
 
-				if (found_kernel)
+				// If kernel not found, then kernel sources are removed. Find all kernels built from this source and remove them.
+				// They'll have same version and revision and different local version
+				if (found_kernels.empty() && found_kernel_sources)
 				{
-					std::string version_str = kernel_version_iter->toString();
+					std::vector<version_info_type> version_vector = found_kernel_sources->version;
+
+					auto kernel_version = kernel_versions_tree.find(version_vector);
+					if (kernel_version != kernel_versions_tree.end())
+					{
+						auto kernel_revision = kernel_version->second.find(found_kernel_sources->revision);
+						if (kernel_revision != kernel_version->second.end())
+						{
+							auto kernel_local_version_iter = kernel_revision->second.begin();
+							auto kernel_local_version_end = kernel_revision->second.end();
+
+							for ( ; kernel_local_version_iter != kernel_local_version_end; ++kernel_local_version_iter)
+							{
+								found_kernels.insert(version_info(found_kernel_sources->version, found_kernel_sources->revision, *kernel_local_version_iter));
+							}
+						}
+					}
+				}
+
+				for (auto found_kernel_iter = found_kernels.begin(); found_kernel_iter != found_kernels.end(); ++found_kernel_iter)
+				{
+					std::string version_str = found_kernel_iter->toString();
 					printf("Removing kernel version %s\n", version_str.c_str());
 
 					std::set<std::string> files;
@@ -706,49 +731,40 @@ int main(int argc, char **argv)
 					}
 
 					// clean everything in /lib/modules
-					auto files_end = files.end();
-					for (auto files_cur = files.begin(); files_cur != files_end; ++files_cur)
+					if (verbose)
 					{
-						if (verbose)
-						{
-							printf("Removing file %s\n", files_cur->c_str());
-						}
+						printf("Recursively removing directory %s\n", (directory_modules + "/" + version_str).c_str());
+					}
 
-						if (!dry_run)
+					if (!dry_run)
+					{
+						auto files_end = files.end();
+						for (auto files_cur = files.begin(); files_cur != files_end; ++files_cur)
 						{
 							remove_file(*files_cur);
 						}
-					}
 
-					// go in reverse order to make sure that top-most directories are removed last
-					auto dirs_end = directories.rend();
-					for (auto dirs_cur = directories.rbegin(); dirs_cur != dirs_end; ++dirs_cur)
-					{
-						if (verbose)
-						{
-							printf("Removing dir %s\n", dirs_cur->c_str());
-						}
-
-						if (!dry_run)
+						// go in reverse order to make sure that top-most directories are removed last
+						auto dirs_end = directories.rend();
+						for (auto dirs_cur = directories.rbegin(); dirs_cur != dirs_end; ++dirs_cur)
 						{
 							remove_directory(*dirs_cur);
 						}
 					}
 
 					// remove kernel from lists
-					kernel_versions_tree[found_kernel->version][found_kernel->revision].erase(found_kernel->local_version);
+					kernel_versions_tree[found_kernel_iter->version][found_kernel_iter->revision].erase(found_kernel_iter->local_version);
 				}
 
-				// TODO: when removing kernel sources make sure to remove all kernel files built from these sources
 				if ((!keep_sources)
-					&& ((found_kernel && kernel_versions_tree[found_kernel->version][found_kernel->revision].empty())
-						|| ((!found_kernel) && found_kernel_sources)))
+					&& ((found_kernels_matched && kernel_versions_tree[found_kernels.begin()->version][found_kernels.begin()->revision].empty())
+						|| ((!found_kernels_matched) && found_kernel_sources)))
 				{
 					std::string version_str;
 
-					if (found_kernel)
+					if (found_kernels_matched)
 					{
-						version_str = versionToString(found_kernel->version) + found_kernel->revision;
+						version_str = versionToString(found_kernels.begin()->version) + found_kernels.begin()->revision;
 					}
 					else
 					{
@@ -763,30 +779,22 @@ int main(int argc, char **argv)
 					find_all_files_and_dirs(directory_src + "/" + prefix_src + version_str, files, directories);
 
 					// clean everything in /usr/src
-					auto files_end = files.end();
-					for (auto files_cur = files.begin(); files_cur != files_end; ++files_cur)
+					if (verbose)
 					{
-						if (verbose)
-						{
-							printf("Removing file %s\n", files_cur->c_str());
-						}
+						printf("Recursively removing directory %s\n", (directory_src + "/" + prefix_src + version_str).c_str());
+					}
 
-						if (!dry_run)
+					if (!dry_run)
+					{
+						auto files_end = files.end();
+						for (auto files_cur = files.begin(); files_cur != files_end; ++files_cur)
 						{
 							remove_file(*files_cur);
 						}
-					}
 
-					// go in reverse order to make sure that top-most directories are removed last
-					auto dirs_end = directories.rend();
-					for (auto dirs_cur = directories.rbegin(); dirs_cur != dirs_end; ++dirs_cur)
-					{
-						if (verbose)
-						{
-							printf("Removing dir %s\n", dirs_cur->c_str());
-						}
-
-						if (!dry_run)
+						// go in reverse order to make sure that top-most directories are removed last
+						auto dirs_end = directories.rend();
+						for (auto dirs_cur = directories.rbegin(); dirs_cur != dirs_end; ++dirs_cur)
 						{
 							remove_directory(*dirs_cur);
 						}
