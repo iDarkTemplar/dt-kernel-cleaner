@@ -299,18 +299,18 @@ std::map<std::vector<version_info_type>, std::map<std::string, std::set<std::str
 void print_help(const char *name)
 {
 	fprintf(stderr,
-	       "USAGE: %s [options] kernel_version\n"
-	       "Options:\n"
-	       "\t[-h] --help - shows this info\n"
-	       "\t[-l] --list-only - list found kernel versions and exit. Do not specify kernel versions with this option\n"
-	       "\t[-v] --verbose - list found files and also print actions before executing them\n"
-	       "\t[-n] --dryrun - do not execute actions, only print them\n"
-	       "\t[-k] --keep-vmlinuzold - do not remove vmlinuz.old symlink if it becomes obsolete\n"
-	       "\t[-c] --clean-old - remove all kernels except the one currently running\n"
-	       "\t[-s] --keep-sources - keep sources even if no kernel is built out of those sources is present\n"
-	       "\n"
-	       "\tkernel version is in format d.d.d-revision or just d.d.d (number of digits is variable)\n",
-	       name);
+		   "USAGE: %s [options] kernel_version\n"
+		   "Options:\n"
+		   "\t[-h] --help - shows this info\n"
+		   "\t[-l] --list-only - list found kernel versions and exit. Do not specify kernel versions with this option\n"
+		   "\t[-v] --verbose - list found files and also print actions before executing them\n"
+		   "\t[-n] --dryrun - do not execute actions, only print them\n"
+		   "\t[-k] --keep-vmlinuzold - do not remove vmlinuz.old symlink if it becomes obsolete\n"
+		   "\t[-c] --clean-old - remove all kernels except the one currently running\n"
+		   "\t[-s] --keep-sources - keep sources even if no kernel is built out of those sources is present\n"
+		   "\n"
+		   "\tkernel version is in format d.d.d-revision or just d.d.d (number of digits is variable)\n",
+		   name);
 }
 
 int main(int argc, char **argv)
@@ -757,7 +757,9 @@ int main(int argc, char **argv)
 				}
 
 				if ((!keep_sources)
-					&& ((found_kernels_matched && kernel_versions_tree[found_kernels.begin()->version][found_kernels.begin()->revision].empty())
+					&& ((found_kernels_matched
+							&& kernel_versions_tree[found_kernels.begin()->version][found_kernels.begin()->revision].empty()
+							&& (kernel_src_versions.find(found_kernels.begin()->version) != kernel_src_versions.end()))
 						|| ((!found_kernels_matched) && found_kernel_sources)))
 				{
 					std::string version_str;
@@ -808,7 +810,9 @@ int main(int argc, char **argv)
 				const std::string vmlinuzold_name = "/boot/vmlinuz.old";
 				struct stat buffer;
 
-				if ((stat(vmlinuzold_name.c_str(), &buffer) != -1) && (S_ISLNK(buffer.st_mode)))
+				if ((lstat(vmlinuzold_name.c_str(), &buffer) != -1)
+					&& (S_ISLNK(buffer.st_mode))
+					&& (stat(vmlinuzold_name.c_str(), &buffer) == -1))
 				{
 					if (verbose)
 					{
