@@ -1,0 +1,16 @@
+dt-kernel-cleaner is a tool for removing installed files and sources of kernel no longer needed
+
+It cleans files in /boot, /lib/modules and /usr/src for selected kernel versions.
+Tool recognizes kernel version and kernel source version. If selected version matches no kernel version, but matches kernel source version,
+then it'll also clean kernels which match kernel source version but have different revision suffix, i.e. kernels built from selected kernel sources.
+Unless option "--keep-sources" is set, when all kernels built from specific kernel source version are cleaned, kernel source is removed too.
+
+USAGE: /usr/sbin/dt-kernel-cleaner [options] kernel_version
+Options:
+	[-h] --help - shows this info
+	[-l] --list-only - list found kernel versions and exit. Do not specify kernel versions with this option
+	[-v] --verbose - list found files and also print actions before executing them
+	[-n] --dryrun - do not execute actions, only print them
+	[-k] --keep-vmlinuzold - do not remove vmlinuz.old symlink if it becomes obsolete
+	[-c] --clean-old - remove all kernels except the one currently running
+	[-s] --keep-sources - keep sources even if no kernel is built out of those sources is present
