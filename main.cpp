@@ -30,9 +30,55 @@
 #include <stdio.h>
 #include <sys/utsname.h>
 
-#include <boost/lexical_cast.hpp>
+#if USE_BOOST
+
 #include <boost/regex.hpp>
 #include <boost/optional.hpp>
+
+template <typename T>
+using optional = boost::optional<T>;
+
+using regex = boost::regex;
+using smatch = boost::smatch;
+using cmatch = boost::cmatch;
+
+template <typename string_type, typename match_type>
+inline bool regex_match(const string_type &str, match_type &match_results, const boost::regex &regex_string)
+{
+	return boost::regex_match(str, match_results, regex_string);
+}
+
+template <typename string_type>
+inline bool regex_match(const string_type &str, const boost::regex &regex_string)
+{
+	return boost::regex_match(str, regex_string);
+}
+
+#else /* USE_BOOST */
+
+#include <regex>
+#include <experimental/optional>
+
+template <typename T>
+using optional = std::experimental::optional<T>;
+
+using regex = std::regex;
+using smatch = std::smatch;
+using cmatch = std::cmatch;
+
+template <typename string_type, typename match_type>
+inline bool regex_match(const string_type &str, match_type &match_results, const std::regex &regex_string)
+{
+	return std::regex_match(str, match_results, regex_string);
+}
+
+template <typename string_type>
+inline bool regex_match(const string_type &str, const std::regex &regex_string)
+{
+	return std::regex_match(str, regex_string);
+}
+
+#endif /* USE_BOOST */
 
 const std::string directory_boot = "/boot";
 const std::string directory_modules = "/lib/modules";
@@ -163,7 +209,7 @@ std::set<std::string> list_files_in_directory(const std::string &location, const
 	std::set<std::string> files;
 	struct stat buffer;
 
-	const boost::regex reg_expr(filter_regex);
+	const regex reg_expr(filter_regex);
 
 	if (stat(location.c_str(), &buffer) != -1)
 	{
@@ -186,7 +232,7 @@ std::set<std::string> list_files_in_directory(const std::string &location, const
 							break;
 						}
 
-						if ((strcmp(dp->d_name,".") != 0) && (strcmp(dp->d_name,"..") != 0) && (filter_regex.empty() || boost::regex_match(dp->d_name, reg_expr)))
+						if ((strcmp(dp->d_name,".") != 0) && (strcmp(dp->d_name,"..") != 0) && (filter_regex.empty() || ::regex_match(dp->d_name, reg_expr)))
 						{
 							files.insert(dp->d_name);
 						}
@@ -262,7 +308,7 @@ std::vector<version_info_type> convertStringToVersion(const std::string &version
 	{
 		pos = version_string.find('.', last_pos);
 
-		version_vector.push_back(boost::lexical_cast<version_info_type>(version_string.substr(last_pos, pos - last_pos)));
+		version_vector.push_back(std::stoul(version_string.substr(last_pos, pos - last_pos)));
 
 		if (pos == std::string::npos)
 		{
@@ -359,9 +405,9 @@ int main(int argc, char **argv)
 			}
 			else
 			{
-				boost::cmatch reg_results;
+				cmatch reg_results;
 
-				if (boost::regex_match(argv[i], reg_results, boost::regex(regex_input_capture)))
+				if (::regex_match(argv[i], reg_results, regex(regex_input_capture)))
 				{
 					version_info version(convertStringToVersion(reg_results.str(1)), reg_results.str(2));
 
@@ -416,9 +462,9 @@ int main(int argc, char **argv)
 				printf("%s\n", iter->c_str());
 			}
 
-			boost::smatch reg_results;
+			smatch reg_results;
 
-			if (boost::regex_match(*iter, reg_results, boost::regex(regex_files_src_capture)))
+			if (::regex_match(*iter, reg_results, regex(regex_files_src_capture)))
 			{
 				std::vector<version_info_type> version_vector = convertStringToVersion(reg_results.str(1));
 				std::string revision_string = reg_results.str(2);
@@ -442,9 +488,9 @@ int main(int argc, char **argv)
 				printf("%s\n", iter->c_str());
 			}
 
-			boost::smatch reg_results;
+			smatch reg_results;
 
-			if (boost::regex_match(*iter, reg_results, boost::regex(regex_files_boot_capture)))
+			if (::regex_match(*iter, reg_results, regex(regex_files_boot_capture)))
 			{
 				std::vector<version_info_type> version_vector = convertStringToVersion(reg_results.str(1));
 				std::string revision_and_local_version_string = reg_results.str(2);
@@ -494,9 +540,9 @@ int main(int argc, char **argv)
 				printf("%s\n", iter->c_str());
 			}
 
-			boost::smatch reg_results;
+			smatch reg_results;
 
-			if (boost::regex_match(*iter, reg_results, boost::regex(regex_files_modules_capture)))
+			if (::regex_match(*iter, reg_results, regex(regex_files_modules_capture)))
 			{
 				std::vector<version_info_type> version_vector = convertStringToVersion(reg_results.str(1));
 				std::string revision_and_local_version_string = reg_results.str(2);
@@ -574,9 +620,9 @@ int main(int argc, char **argv)
 
 				std::string current_version = name.release;
 
-				boost::smatch reg_results;
+				smatch reg_results;
 
-				if (!boost::regex_match(current_version, reg_results, boost::regex(regex_input_capture)))
+				if (! ::regex_match(current_version, reg_results, regex(regex_input_capture)))
 				{
 					std::stringstream str;
 					str << "Failed to parse version string returned by uname(): " << current_version;
@@ -620,7 +666,7 @@ int main(int argc, char **argv)
 			{
 				bool found_kernels_matched = false;
 				std::set<version_info> found_kernels;
-				boost::optional<version_info> found_kernel_sources;
+				optional<version_info> found_kernel_sources;
 
 				{
 					std::vector<version_info_type> version_vector = kernel_version_iter->version;
