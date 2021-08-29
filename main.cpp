@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 i.Dark_Templar <darktemplar@dark-templar-archives.net>
+ * Copyright (C) 2016-2021 i.Dark_Templar <darktemplar@dark-templar-archives.net>
  *
  * This file is part of DT Kernel Cleaner.
  *
@@ -18,67 +18,19 @@
  *
  */
 
+#include <functional>
+#include <optional>
+#include <regex>
+#include <set>
 #include <string>
 #include <vector>
-#include <set>
-#include <functional>
 
-#include <sys/stat.h>
-#include <unistd.h>
 #include <dirent.h>
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
+#include <sys/stat.h>
 #include <sys/utsname.h>
-
-#if USE_BOOST
-
-#include <boost/regex.hpp>
-#include <boost/optional.hpp>
-
-template <typename T>
-using optional = boost::optional<T>;
-
-using regex = boost::regex;
-using smatch = boost::smatch;
-using cmatch = boost::cmatch;
-
-template <typename string_type, typename match_type>
-inline bool regex_match(const string_type &str, match_type &match_results, const boost::regex &regex_string)
-{
-	return boost::regex_match(str, match_results, regex_string);
-}
-
-template <typename string_type>
-inline bool regex_match(const string_type &str, const boost::regex &regex_string)
-{
-	return boost::regex_match(str, regex_string);
-}
-
-#else /* USE_BOOST */
-
-#include <regex>
-#include <experimental/optional>
-
-template <typename T>
-using optional = std::experimental::optional<T>;
-
-using regex = std::regex;
-using smatch = std::smatch;
-using cmatch = std::cmatch;
-
-template <typename string_type, typename match_type>
-inline bool regex_match(const string_type &str, match_type &match_results, const std::regex &regex_string)
-{
-	return std::regex_match(str, match_results, regex_string);
-}
-
-template <typename string_type>
-inline bool regex_match(const string_type &str, const std::regex &regex_string)
-{
-	return std::regex_match(str, regex_string);
-}
-
-#endif /* USE_BOOST */
+#include <unistd.h>
 
 const std::string directory_boot = "/boot";
 const std::string directory_modules = "/lib/modules";
@@ -209,7 +161,7 @@ std::set<std::string> list_files_in_directory(const std::string &location, const
 	std::set<std::string> files;
 	struct stat buffer;
 
-	const regex reg_expr(filter_regex);
+	const std::regex reg_expr(filter_regex);
 
 	if (stat(location.c_str(), &buffer) != -1)
 	{
@@ -221,18 +173,16 @@ std::set<std::string> list_files_in_directory(const std::string &location, const
 			{
 				try
 				{
-					struct dirent *dp;
-
 					for (;;)
 					{
-						dp = readdir(dirp);
+						struct dirent *dp = readdir(dirp);
 
 						if (dp == NULL)
 						{
 							break;
 						}
 
-						if ((strcmp(dp->d_name,".") != 0) && (strcmp(dp->d_name,"..") != 0) && (filter_regex.empty() || ::regex_match(dp->d_name, reg_expr)))
+						if ((strcmp(dp->d_name,".") != 0) && (strcmp(dp->d_name,"..") != 0) && (filter_regex.empty() || std::regex_match(dp->d_name, reg_expr)))
 						{
 							files.insert(dp->d_name);
 						}
@@ -301,12 +251,11 @@ std::vector<version_info_type> convertStringToVersion(const std::string &version
 {
 	std::vector<version_info_type> version_vector;
 
-	size_t pos = 0;
 	size_t last_pos = 0;
 
 	for (;;)
 	{
-		pos = version_string.find('.', last_pos);
+		size_t pos = version_string.find('.', last_pos);
 
 		version_vector.push_back(std::stoul(version_string.substr(last_pos, pos - last_pos)));
 
@@ -405,9 +354,9 @@ int main(int argc, char **argv)
 			}
 			else
 			{
-				cmatch reg_results;
+				std::cmatch reg_results;
 
-				if (::regex_match(argv[i], reg_results, regex(regex_input_capture)))
+				if (std::regex_match(argv[i], reg_results, std::regex(regex_input_capture)))
 				{
 					version_info version(convertStringToVersion(reg_results.str(1)), reg_results.str(2));
 
@@ -462,9 +411,9 @@ int main(int argc, char **argv)
 				printf("%s\n", iter->c_str());
 			}
 
-			smatch reg_results;
+			std::smatch reg_results;
 
-			if (::regex_match(*iter, reg_results, regex(regex_files_src_capture)))
+			if (std::regex_match(*iter, reg_results, std::regex(regex_files_src_capture)))
 			{
 				std::vector<version_info_type> version_vector = convertStringToVersion(reg_results.str(1));
 				std::string revision_string = reg_results.str(2);
@@ -488,9 +437,9 @@ int main(int argc, char **argv)
 				printf("%s\n", iter->c_str());
 			}
 
-			smatch reg_results;
+			std::smatch reg_results;
 
-			if (::regex_match(*iter, reg_results, regex(regex_files_boot_capture)))
+			if (std::regex_match(*iter, reg_results, std::regex(regex_files_boot_capture)))
 			{
 				std::vector<version_info_type> version_vector = convertStringToVersion(reg_results.str(1));
 				std::string revision_and_local_version_string = reg_results.str(2);
@@ -540,9 +489,9 @@ int main(int argc, char **argv)
 				printf("%s\n", iter->c_str());
 			}
 
-			smatch reg_results;
+			std::smatch reg_results;
 
-			if (::regex_match(*iter, reg_results, regex(regex_files_modules_capture)))
+			if (std::regex_match(*iter, reg_results, std::regex(regex_files_modules_capture)))
 			{
 				std::vector<version_info_type> version_vector = convertStringToVersion(reg_results.str(1));
 				std::string revision_and_local_version_string = reg_results.str(2);
@@ -620,9 +569,9 @@ int main(int argc, char **argv)
 
 				std::string current_version = name.release;
 
-				smatch reg_results;
+				std::smatch reg_results;
 
-				if (! ::regex_match(current_version, reg_results, regex(regex_input_capture)))
+				if (!std::regex_match(current_version, reg_results, std::regex(regex_input_capture)))
 				{
 					std::stringstream str;
 					str << "Failed to parse version string returned by uname(): " << current_version;
@@ -666,7 +615,7 @@ int main(int argc, char **argv)
 			{
 				bool found_kernels_matched = false;
 				std::set<version_info> found_kernels;
-				optional<version_info> found_kernel_sources;
+				std::optional<version_info> found_kernel_sources;
 
 				{
 					std::vector<version_info_type> version_vector = kernel_version_iter->version;
@@ -740,10 +689,10 @@ int main(int argc, char **argv)
 					std::string version_str = found_kernel_iter->toString();
 					printf("Removing kernel version %s\n", version_str.c_str());
 
-					std::set<std::string> files;
+					std::set<std::string> found_files;
 					std::set<std::string> directories;
 
-					find_all_files_and_dirs(directory_modules + "/" + version_str, files, directories);
+					find_all_files_and_dirs(directory_modules + "/" + version_str, found_files, directories);
 
 					// clean everything in /boot
 					if (verbose)
@@ -784,8 +733,8 @@ int main(int argc, char **argv)
 
 					if (!dry_run)
 					{
-						auto files_end = files.end();
-						for (auto files_cur = files.begin(); files_cur != files_end; ++files_cur)
+						auto files_end = found_files.end();
+						for (auto files_cur = found_files.begin(); files_cur != files_end; ++files_cur)
 						{
 							remove_file(*files_cur);
 						}
@@ -821,10 +770,10 @@ int main(int argc, char **argv)
 
 					printf("Removing kernel sources version %s\n", version_str.c_str());
 
-					std::set<std::string> files;
+					std::set<std::string> found_files;
 					std::set<std::string> directories;
 
-					find_all_files_and_dirs(directory_src + "/" + prefix_src + version_str, files, directories);
+					find_all_files_and_dirs(directory_src + "/" + prefix_src + version_str, found_files, directories);
 
 					// clean everything in /usr/src
 					if (verbose)
@@ -834,8 +783,8 @@ int main(int argc, char **argv)
 
 					if (!dry_run)
 					{
-						auto files_end = files.end();
-						for (auto files_cur = files.begin(); files_cur != files_end; ++files_cur)
+						auto files_end = found_files.end();
+						for (auto files_cur = found_files.begin(); files_cur != files_end; ++files_cur)
 						{
 							remove_file(*files_cur);
 						}
