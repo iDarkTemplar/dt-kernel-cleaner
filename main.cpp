@@ -48,13 +48,14 @@ const std::string prefix_src = "linux-";
 const std::string regex_version = "\\d+(?:\\.\\d+)*";
 const std::string regex_revision_and_local_version = "(?:-|_)\\S+";
 
-const std::string regex_files_boot_check = "^(?:(?:" + prefix_boot_config + ")|(?:" + prefix_boot_map_regex + ")|(?:" + prefix_boot_image + "))?" + regex_version + regex_revision_and_local_version + "$";
-const std::string regex_files_boot_initramfs_check = "^(?:" + prefix_boot_initramfs + ")?" + regex_version + regex_revision_and_local_version + "\\.img$";
+const std::string regex_files_boot_check = "^(?:(?:" + prefix_boot_config + ")|(?:" + prefix_boot_map_regex + ")|(?:" + prefix_boot_image + "))?" + regex_version + regex_revision_and_local_version + "(?:\\.old)?$";
+const std::string regex_files_boot_initramfs_check = "^(?:" + prefix_boot_initramfs + ")?" + regex_version + regex_revision_and_local_version + "\\.img(?:\\.old)?$";
 const std::string regex_files_modules_check = "^" + regex_version + regex_revision_and_local_version + "$";
 const std::string regex_files_src_check = "^(?:" + prefix_src + ")?" + regex_version + regex_revision_and_local_version + "$";
 
 const std::string regex_files_boot_capture = "^(?:(?:" + prefix_boot_config + ")|(?:" + prefix_boot_map_regex + ")|(?:" + prefix_boot_image + "))?(" + regex_version + ")(" + regex_revision_and_local_version + ")$";
-const std::string regex_files_boot_initramfs_capture = "^(?:" + prefix_boot_initramfs + ")?(" + regex_version + ")(" + regex_revision_and_local_version + ")\\.img$";
+const std::string regex_files_boot_capture_old = "^(?:(?:" + prefix_boot_config + ")|(?:" + prefix_boot_map_regex + ")|(?:" + prefix_boot_image + "))?(" + regex_version + ")(" + regex_revision_and_local_version + ")\\.old$";
+const std::string regex_files_boot_initramfs_capture = "^(?:" + prefix_boot_initramfs + ")?(" + regex_version + ")(" + regex_revision_and_local_version + ")\\.img(?:\\.old)?$";
 const std::string regex_files_modules_capture = "^(" + regex_version + ")(" + regex_revision_and_local_version + ")$";
 const std::string regex_files_src_capture = "^(?:" + prefix_src + ")?(" + regex_version + ")(" + regex_revision_and_local_version + ")$";
 const std::string regex_input_capture = "^(" + regex_version + ")((?:" + regex_revision_and_local_version + ")?)$";
@@ -457,7 +458,9 @@ int main(int argc, char **argv)
 
 			std::smatch reg_results;
 
-			if (std::regex_match(*iter, reg_results, std::regex(regex_files_boot_capture)) || std::regex_match(*iter, reg_results, std::regex(regex_files_boot_initramfs_capture)))
+			if (std::regex_match(*iter, reg_results, std::regex(regex_files_boot_capture_old))
+				|| std::regex_match(*iter, reg_results, std::regex(regex_files_boot_capture))
+				|| std::regex_match(*iter, reg_results, std::regex(regex_files_boot_initramfs_capture)))
 			{
 				std::vector<version_info_type> version_vector = convertStringToVersion(reg_results.str(1));
 				std::string revision_and_local_version_string = reg_results.str(2);
@@ -707,6 +710,8 @@ int main(int argc, char **argv)
 					std::string version_str = found_kernel_iter->toString();
 					printf("Removing kernel version %s\n", version_str.c_str());
 
+					struct stat buffer;
+
 					std::set<std::string> found_files;
 					std::set<std::string> directories;
 
@@ -743,14 +748,69 @@ int main(int argc, char **argv)
 						remove_file(directory_boot + "/" + prefix_boot_image + version_str);
 					}
 
-					if (verbose)
+					if (stat((directory_boot + "/" + prefix_boot_initramfs + version_str + ".img").c_str(), &buffer) != -1)
 					{
-						printf("Removing file %s\n", (directory_boot + "/" + prefix_boot_initramfs + version_str + ".img").c_str());
+						if (verbose)
+						{
+							printf("Removing file %s\n", (directory_boot + "/" + prefix_boot_initramfs + version_str + ".img").c_str());
+						}
+
+						if (!dry_run)
+						{
+							remove_file(directory_boot + "/" + prefix_boot_initramfs + version_str + ".img");
+						}
 					}
 
-					if (!dry_run)
+					if (stat((directory_boot + "/" + prefix_boot_config + version_str + ".old").c_str(), &buffer) != -1)
 					{
-						remove_file(directory_boot + "/" + prefix_boot_initramfs + version_str + ".img");
+						if (verbose)
+						{
+							printf("Removing file %s\n", (directory_boot + "/" + prefix_boot_config + version_str + ".old").c_str());
+						}
+
+						if (!dry_run)
+						{
+							remove_file(directory_boot + "/" + prefix_boot_config + version_str + ".old");
+						}
+					}
+
+					if (stat((directory_boot + "/" + prefix_boot_map + version_str + ".old").c_str(), &buffer) != -1)
+					{
+						if (verbose)
+						{
+							printf("Removing file %s\n", (directory_boot + "/" + prefix_boot_map + version_str + ".old").c_str());
+						}
+
+						if (!dry_run)
+						{
+							remove_file(directory_boot + "/" + prefix_boot_map + version_str + ".old");
+						}
+					}
+
+					if (stat((directory_boot + "/" + prefix_boot_image + version_str + ".old").c_str(), &buffer) != -1)
+					{
+						if (verbose)
+						{
+							printf("Removing file %s\n", (directory_boot + "/" + prefix_boot_image + version_str + ".old").c_str());
+						}
+
+						if (!dry_run)
+						{
+							remove_file(directory_boot + "/" + prefix_boot_image + version_str + ".old");
+						}
+					}
+
+					if (stat((directory_boot + "/" + prefix_boot_initramfs + version_str + ".img.old").c_str(), &buffer) != -1)
+					{
+						if (verbose)
+						{
+							printf("Removing file %s\n", (directory_boot + "/" + prefix_boot_initramfs + version_str + ".img.old").c_str());
+						}
+
+						if (!dry_run)
+						{
+							remove_file(directory_boot + "/" + prefix_boot_initramfs + version_str + ".img.old");
+						}
 					}
 
 					// clean everything in /lib/modules
